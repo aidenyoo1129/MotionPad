@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { CanvasObject, CanvasState } from '@/lib/whiteboard-types';
 import { findNearestObjectAt } from '@/lib/whiteboard-reducer';
 
@@ -11,7 +11,7 @@ interface WhiteboardCanvasProps {
   onPan: (deltaX: number, deltaY: number) => void;
   leftHand?: { x: number; y: number } | null;
   rightHand?: { x: number; y: number } | null;
-  gesture?: 'grab' | 'release' | 'pan' | null;
+  gesture?: 'grab' | 'release' | 'pan' | 'pointing' | null;
 }
 
 export function WhiteboardCanvas({
@@ -36,15 +36,16 @@ export function WhiteboardCanvas({
   
   // Calculate hand position on screen for visual feedback
   // Note: Mirror X coordinate for front-facing camera (MediaPipe coordinates are relative to video frame, not mirrored view)
-  const handScreenPos = activeHand && canvasRef.current
-    ? (() => {
-        const rect = canvasRef.current!.getBoundingClientRect();
-        return {
-          x: (1 - activeHand.x) * rect.width,  // Mirror X: 1 - x
-          y: activeHand.y * rect.height,
-        };
-      })()
-    : null;
+  // Use useMemo to avoid recalculating on every render
+  const handScreenPos = useMemo(() => {
+    if (!activeHand || !canvasRef.current) return null;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    return {
+      x: (1 - activeHand.x) * rect.width,  // Mirror X: 1 - x
+      y: activeHand.y * rect.height,
+    };
+  }, [activeHand?.x, activeHand?.y, activeHand]);
 
   // Convert screen coordinates to canvas coordinates
   const screenToCanvas = useCallback(
@@ -73,7 +74,21 @@ export function WhiteboardCanvas({
 
   // Handle hand gesture interactions
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current) {
+      console.log('[Canvas Debug] Canvas ref not available');
+      return;
+    }
+
+    console.log('[Canvas Debug] Hand gesture effect triggered:', {
+      gesture,
+      hasLeftHand: !!leftHand,
+      hasRightHand: !!rightHand,
+      objectsCount: state.objects.length,
+      selectedId: state.selectedId,
+      snapGuidesCount: state.snapGuides?.length || 0,
+      isDragging: isDraggingRef.current,
+      dragObjectId: dragObjectRef.current,
+    });
 
     const rect = canvasRef.current.getBoundingClientRect();
 
@@ -108,12 +123,23 @@ export function WhiteboardCanvas({
     const screenY = activeHand.y * rect.height;
     const canvasPos = screenToCanvas(screenX, screenY);
 
-    // Find nearest object for proximity feedback (even when not grabbing)
+    // Find nearest object for proximity feedback (when pointing or hovering)
     const nearest = findNearestObjectAt(state.objects, canvasPos.x, canvasPos.y, 80);
-    if (nearest && !nearest.locked && gesture !== 'grab' && !isDraggingRef.current) {
+    
+    // Handle pointing gesture for hover/preview
+    if (gesture === 'pointing' && nearest && !nearest.locked) {
+      setHoveredObjectId(nearest.id);
+    } else if (gesture === 'pointing' && !nearest) {
+      setHoveredObjectId(null);
+    }
+    
+    // Handle proximity feedback when not grabbing or pointing
+    if (nearest && !nearest.locked && gesture !== 'grab' && gesture !== 'pointing' && !isDraggingRef.current) {
       setHoveredObjectId(nearest.id);
     } else if (!nearest || gesture === 'grab' || isDraggingRef.current) {
-      setHoveredObjectId(null);
+      if (gesture !== 'pointing') {
+        setHoveredObjectId(null);
+      }
     }
 
     if (gesture === 'grab' && !isDraggingRef.current) {
@@ -169,6 +195,26 @@ export function WhiteboardCanvas({
     const isHovered = obj.id === hoveredObjectId;
     const isDragging = obj.id === dragObjectRef.current && isDraggingRef.current;
     
+    // Apple-style shadows and borders
+    const getShadow = () => {
+      if (isDragging) {
+        return '0 20px 60px rgba(0, 0, 0, 0.3), 0 8px 16px rgba(0, 0, 0, 0.2)';
+      }
+      if (isSelected) {
+        return '0 12px 40px rgba(0, 122, 255, 0.25), 0 4px 12px rgba(0, 122, 255, 0.15)';
+      }
+      if (isHovered) {
+        // Enhanced hover shadow for better visual feedback
+        return '0 12px 32px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08)';
+      }
+      return '0 4px 16px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)';
+    };
+    
+    const getBorder = () => {
+      // No borders - only shadows for visual feedback
+      return 'none';
+    };
+    
     const style: React.CSSProperties = {
       position: 'absolute',
       left: `${obj.x}px`,
@@ -176,31 +222,24 @@ export function WhiteboardCanvas({
       width: `${obj.width}px`,
       height: `${obj.height}px`,
       backgroundColor: obj.color,
-      border: isSelected 
-        ? '4px solid #60a5fa' 
-        : isHovered 
-        ? '3px solid #93c5fd' 
-        : '2px solid rgba(0,0,0,0.2)',
-      borderRadius: obj.type === 'circle' ? '50%' : obj.type === 'sticky' ? '4px' : '2px',
-      boxShadow: isDragging
-        ? '0 0 20px rgba(96,165,250,0.8), 0 0 40px rgba(96,165,250,0.4)'
-        : isSelected
-        ? '0 0 15px rgba(96,165,250,0.6), 0 0 30px rgba(96,165,250,0.3)'
-        : isHovered
-        ? '0 0 10px rgba(147,197,253,0.5)'
-        : '0 2px 4px rgba(0,0,0,0.1)',
+      border: getBorder(),
+      borderRadius: obj.type === 'circle' ? '50%' : obj.type === 'sticky' ? '12px' : '12px',
+      boxShadow: getShadow(),
       cursor: obj.locked ? 'not-allowed' : 'move',
-      opacity: obj.locked ? 0.6 : isDragging ? 0.9 : 1,
+      opacity: obj.locked ? 0.5 : isDragging ? 0.95 : 1,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: obj.type === 'textbox' || obj.type === 'sticky' ? '8px' : '0',
-      fontSize: '14px',
+      padding: obj.type === 'textbox' || obj.type === 'sticky' ? '12px' : '0',
+      fontSize: '15px',
+      fontWeight: 500,
       color: '#000',
       wordWrap: 'break-word',
       overflow: 'hidden',
-      transform: isDragging ? 'scale(1.05)' : 'scale(1)',
-      transition: isDragging ? 'none' : 'transform 0.1s ease, box-shadow 0.2s ease, border 0.2s ease',
+      transform: isDragging ? 'scale(1.02)' : 'scale(1)',
+      transition: isDragging 
+        ? 'none' 
+        : 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
       zIndex: isDragging ? 1000 : isSelected ? 100 : isHovered ? 50 : 1,
     };
 
@@ -227,15 +266,31 @@ export function WhiteboardCanvas({
         );
 
       case 'arrow':
+        // Calculate shadow parameters based on state
+        const shadowBlur = isDragging ? 8 : isSelected ? 6 : isHovered ? 4 : 2;
+        const shadowOffset = isDragging ? 4 : isSelected ? 3 : isHovered ? 2 : 1;
+        const shadowOpacity = isDragging ? 0.3 : isSelected ? 0.25 : isHovered ? 0.18 : 0.1;
+        const hasShadow = isDragging || isSelected || isHovered;
+        
         return (
           <div
             key={obj.id}
             style={{
-              ...style,
-              backgroundColor: 'transparent',
-              border: 'none',
+              position: 'absolute',
+              left: `${obj.x}px`,
+              top: `${obj.y}px`,
               width: `${obj.width}px`,
               height: `${obj.height}px`,
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: obj.locked ? 'not-allowed' : 'move',
+              opacity: obj.locked ? 0.5 : isDragging ? 0.95 : 1,
+              transform: isDragging ? 'scale(1.02)' : 'scale(1)',
+              transition: isDragging 
+                ? 'none' 
+                : 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              zIndex: isDragging ? 1000 : isSelected ? 100 : isHovered ? 50 : 1,
+              pointerEvents: obj.locked ? 'none' : 'all',
             }}
           >
             <svg
@@ -246,27 +301,96 @@ export function WhiteboardCanvas({
               <defs>
                 <marker
                   id={`arrowhead-${obj.id}`}
-                  markerWidth="10"
-                  markerHeight="10"
-                  refX="9"
-                  refY="3"
+                  markerWidth="12"
+                  markerHeight="12"
+                  refX="10"
+                  refY="6"
                   orient="auto"
+                  markerUnits="strokeWidth"
                 >
-                  <polygon points="0 0, 10 3, 0 6" fill={obj.color} />
+                  <path
+                    d="M 0 0 L 12 6 L 0 12 Z"
+                    fill={obj.color}
+                    opacity={obj.locked ? 0.5 : 1}
+                  />
                 </marker>
+                {/* Shadow filter that follows the arrow shape (line + arrowhead) */}
+                {hasShadow && (
+                  <filter id={`arrow-shadow-${obj.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur in="SourceAlpha" stdDeviation={shadowBlur} />
+                    <feOffset dx="0" dy={shadowOffset} result="offsetblur" />
+                    <feComponentTransfer>
+                      <feFuncA type="linear" slope={shadowOpacity * 10} />
+                    </feComponentTransfer>
+                    <feMerge>
+                      <feMergeNode />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                )}
+                {/* Colored shadow for selected state */}
+                {isSelected && (
+                  <filter id={`arrow-selected-shadow-${obj.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur in="SourceAlpha" stdDeviation="6" />
+                    <feOffset dx="0" dy="3" result="offsetblur" />
+                    <feFlood floodColor="rgba(0, 122, 255, 0.25)" />
+                    <feComposite in2="offsetblur" operator="in" />
+                    <feGaussianBlur stdDeviation="4" />
+                    <feOffset dx="0" dy="2" />
+                    <feComponentTransfer>
+                      <feFuncA type="linear" slope="0.15" />
+                    </feComponentTransfer>
+                    <feMerge>
+                      <feMergeNode />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                )}
               </defs>
+              {/* Shadow layer - rendered first if shadow is needed */}
+              {hasShadow && (
+                <line
+                  x1="8"
+                  y1={obj.height / 2}
+                  x2={obj.width - 8}
+                  y2={obj.height / 2}
+                  stroke={isSelected ? 'rgba(0, 122, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)'}
+                  strokeWidth={isDragging ? 4 : isSelected ? 3.5 : 3}
+                  markerEnd={`url(#arrowhead-${obj.id})`}
+                  opacity={0.4}
+                  filter={isSelected ? `url(#arrow-selected-shadow-${obj.id})` : `url(#arrow-shadow-${obj.id})`}
+                  style={{ pointerEvents: 'none' }}
+                />
+              )}
+              {/* Main arrow - always visible */}
               <line
-                x1="0"
+                x1="8"
                 y1={obj.height / 2}
-                x2={obj.width}
+                x2={obj.width - 8}
                 y2={obj.height / 2}
                 stroke={obj.color}
-                strokeWidth="3"
+                strokeWidth={isDragging ? 4 : isSelected ? 3.5 : 3}
                 markerEnd={`url(#arrowhead-${obj.id})`}
+                opacity={obj.locked ? 0.5 : 1}
+                style={{
+                  transition: isDragging 
+                    ? 'none' 
+                    : 'stroke-width 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
               />
             </svg>
             {obj.text && (
-              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+              <div style={{ 
+                position: 'absolute', 
+                top: '50%', 
+                left: '50%', 
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'none',
+                fontSize: '15px',
+                fontWeight: 500,
+                color: '#000',
+                userSelect: 'none',
+              }}>
                 {obj.text}
               </div>
             )}
@@ -295,12 +419,13 @@ export function WhiteboardCanvas({
         width: '100%',
         height: '100%',
         overflow: 'hidden',
+        backgroundColor: '#f2f2f7',
         backgroundImage: `
-          linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)
+          linear-gradient(rgba(142, 142, 147, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(142, 142, 147, 0.08) 1px, transparent 1px)
         `,
-        backgroundSize: `${10 * state.zoom}px ${10 * state.zoom}px`,
-        backgroundPosition: `${state.panX % (10 * state.zoom)}px ${state.panY % (10 * state.zoom)}px`,
+        backgroundSize: `${20 * state.zoom}px ${20 * state.zoom}px`,
+        backgroundPosition: `${state.panX % (20 * state.zoom)}px ${state.panY % (20 * state.zoom)}px`,
       }}
     >
       <div
@@ -315,77 +440,56 @@ export function WhiteboardCanvas({
         {state.objects.map(renderObject)}
       </div>
       
-      {/* Hand position indicator */}
+      {/* Hand position indicator - Apple Style Glass */}
       {handScreenPos && (
         <div
+          className="glass-strong"
           style={{
             position: 'absolute',
             left: `${handScreenPos.x}px`,
             top: `${handScreenPos.y}px`,
             transform: 'translate(-50%, -50%)',
-            width: gesture === 'grab' ? '40px' : '30px',
-            height: gesture === 'grab' ? '40px' : '30px',
+            width: gesture === 'grab' ? '48px' : gesture === 'pointing' ? '32px' : '40px',
+            height: gesture === 'grab' ? '48px' : gesture === 'pointing' ? '32px' : '40px',
             borderRadius: '50%',
             border: gesture === 'grab' 
-              ? '3px solid #ef4444' 
+              ? '2px solid #ff3b30' 
               : gesture === 'pan'
-              ? '3px solid #3b82f6'
-              : '2px solid #10b981',
+              ? '2px solid #007aff'
+              : gesture === 'pointing'
+              ? '2px solid #ff9500'
+              : '2px solid #34c759',
             backgroundColor: gesture === 'grab'
-              ? 'rgba(239, 68, 68, 0.2)'
+              ? 'rgba(255, 59, 48, 0.15)'
               : gesture === 'pan'
-              ? 'rgba(59, 130, 246, 0.2)'
-              : 'rgba(16, 185, 129, 0.2)',
+              ? 'rgba(0, 122, 255, 0.15)'
+              : gesture === 'pointing'
+              ? 'rgba(255, 149, 0, 0.15)'
+              : 'rgba(52, 199, 89, 0.15)',
             pointerEvents: 'none',
             zIndex: 2000,
-            transition: 'all 0.1s ease',
-            boxShadow: '0 0 10px rgba(255,255,255,0.5)',
+            // Only transition non-position properties for smooth visual changes
+            // Position changes should be instant for real-time tracking
+            transition: 'width 0.15s ease-out, height 0.15s ease-out, border-color 0.15s ease-out, background-color 0.15s ease-out',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
           {/* Gesture icon */}
           <div
             style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              fontSize: gesture === 'grab' ? '20px' : '16px',
-              color: gesture === 'grab' ? '#ef4444' : gesture === 'pan' ? '#3b82f6' : '#10b981',
-              fontWeight: 'bold',
+              fontSize: gesture === 'grab' ? '22px' : gesture === 'pointing' ? '16px' : '18px',
+              lineHeight: 1,
             }}
           >
-            {gesture === 'grab' ? '✊' : gesture === 'pan' ? '✋' : '👆'}
+            {gesture === 'grab' ? '🤏' : gesture === 'pan' ? '🤏🤏' : gesture === 'pointing' ? '👆' : '👋'}
           </div>
         </div>
       )}
       
-      {/* Proximity indicator - shows which object is near hand */}
-      {handScreenPos && hoveredObjectId && !isDraggingRef.current && gesture !== 'grab' && (
-        (() => {
-          const hoveredObj = state.objects.find(o => o.id === hoveredObjectId);
-          if (!hoveredObj) return null;
-          const screenPos = canvasToScreen(hoveredObj.x + hoveredObj.width / 2, hoveredObj.y + hoveredObj.height / 2);
-          return (
-            <div
-              style={{
-                position: 'absolute',
-                left: `${screenPos.x}px`,
-                top: `${screenPos.y}px`,
-                transform: 'translate(-50%, -50%)',
-                width: `${Math.max(hoveredObj.width, hoveredObj.height) + 20}px`,
-                height: `${Math.max(hoveredObj.width, hoveredObj.height) + 20}px`,
-                borderRadius: hoveredObj.type === 'circle' ? '50%' : '8px',
-                border: '2px dashed #93c5fd',
-                pointerEvents: 'none',
-                zIndex: 1500,
-                animation: 'pulse 2s ease-in-out infinite',
-              }}
-            />
-          );
-        })()
-      )}
       
-      {/* Dragging indicator - shows connection between hand and object */}
+      {/* Dragging indicator - Apple Style */}
       {handScreenPos && isDraggingRef.current && dragObjectRef.current && (
         (() => {
           const draggedObj = state.objects.find(o => o.id === dragObjectRef.current);
@@ -408,10 +512,11 @@ export function WhiteboardCanvas({
                 y1={handScreenPos.y}
                 x2={objScreenPos.x}
                 y2={objScreenPos.y}
-                stroke="#60a5fa"
-                strokeWidth="2"
-                strokeDasharray="5,5"
-                opacity="0.6"
+                stroke="#007aff"
+                strokeWidth="2.5"
+                strokeDasharray="6,4"
+                opacity="0.5"
+                strokeLinecap="round"
               />
             </svg>
           );
@@ -421,15 +526,46 @@ export function WhiteboardCanvas({
       {/* Snap guides - blue lines showing alignment */}
       {isDraggingRef.current && state.snapGuides && state.snapGuides.length > 0 && (
         (() => {
+          console.log('[Canvas Debug] Snap guides rendering check:', {
+            isDragging: isDraggingRef.current,
+            dragObjectId: dragObjectRef.current,
+            snapGuidesCount: state.snapGuides?.length || 0,
+            objectsCount: state.objects.length,
+            snapGuides: state.snapGuides,
+          });
+          
           const draggedObj = state.objects.find(o => o.id === dragObjectRef.current);
-          if (!draggedObj) return null;
+          if (!draggedObj) {
+            console.warn('[Canvas Debug] Dragged object not found:', {
+              dragObjectId: dragObjectRef.current,
+              availableObjectIds: state.objects.map(o => o.id),
+            });
+            return null;
+          }
           
           // Get bounding box of all objects involved in snapping
-          const allObjects = [draggedObj, ...state.snapGuides.map(g => 
-            state.objects.find(o => o.id === g.toObject.id)
-          ).filter(Boolean) as CanvasObject[]];
+          const allObjects = [draggedObj, ...state.snapGuides.map(g => {
+            const obj = state.objects.find(o => o.id === g.toObject.id);
+            if (!obj) {
+              console.warn('[Canvas Debug] Snap guide references non-existent object:', {
+                guide: g,
+                referencedObjectId: g.toObject.id,
+                availableObjectIds: state.objects.map(o => o.id),
+              });
+            }
+            return obj;
+          }).filter(Boolean) as CanvasObject[]];
           
-          if (allObjects.length === 0) return null;
+          console.log('[Canvas Debug] All objects for snap guides:', {
+            draggedObj: draggedObj.id,
+            guideObjects: allObjects.slice(1).map(o => o.id),
+            totalObjects: allObjects.length,
+          });
+          
+          if (allObjects.length === 0) {
+            console.warn('[Canvas Debug] No objects found for snap guide rendering');
+            return null;
+          }
           
           // Calculate bounds
           let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -475,9 +611,10 @@ export function WhiteboardCanvas({
                       y1={screenMinY}
                       x2={screenX}
                       y2={screenMaxY}
-                      stroke="#3b82f6"
+                      stroke="#007aff"
                       strokeWidth="2"
-                      opacity="0.8"
+                      opacity="0.6"
+                      strokeDasharray="4,4"
                     />
                   );
                 } else {
@@ -489,9 +626,10 @@ export function WhiteboardCanvas({
                       y1={screenY}
                       x2={screenMaxX}
                       y2={screenY}
-                      stroke="#3b82f6"
+                      stroke="#007aff"
                       strokeWidth="2"
-                      opacity="0.8"
+                      opacity="0.6"
+                      strokeDasharray="4,4"
                     />
                   );
                 }
@@ -505,12 +643,12 @@ export function WhiteboardCanvas({
         __html: `
           @keyframes pulse {
             0%, 100% {
-              opacity: 0.4;
+              opacity: 0.3;
               transform: translate(-50%, -50%) scale(1);
             }
             50% {
-              opacity: 0.7;
-              transform: translate(-50%, -50%) scale(1.05);
+              opacity: 0.6;
+              transform: translate(-50%, -50%) scale(1.02);
             }
           }
         `

@@ -23,6 +23,39 @@ export default function WhiteboardPage() {
   const [state, dispatch] = useReducer(canvasReducer, initialState);
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // Diagnostic: Log state changes, especially when objects array is empty
+  useEffect(() => {
+    console.log('[Whiteboard Debug] State changed:', {
+      objectsCount: state.objects.length,
+      selectedId: state.selectedId,
+      snapGuidesCount: state.snapGuides?.length || 0,
+      hasSelectedId: !!state.selectedId,
+      selectedIdExists: state.selectedId ? state.objects.some(o => o.id === state.selectedId) : false,
+      snapGuidesObjectIds: state.snapGuides?.map(g => g.toObject.id) || [],
+      allObjectIds: state.objects.map(o => o.id),
+    });
+    
+    // Check for state inconsistencies
+    if (state.selectedId && !state.objects.some(o => o.id === state.selectedId)) {
+      console.warn('[Whiteboard Debug] ⚠️ State inconsistency: selectedId references non-existent object:', {
+        selectedId: state.selectedId,
+        availableObjectIds: state.objects.map(o => o.id),
+      });
+    }
+    
+    if (state.snapGuides && state.snapGuides.length > 0) {
+      const invalidGuides = state.snapGuides.filter(g => 
+        !state.objects.some(o => o.id === g.toObject.id)
+      );
+      if (invalidGuides.length > 0) {
+        console.warn('[Whiteboard Debug] ⚠️ State inconsistency: snapGuides reference non-existent objects:', {
+          invalidGuides,
+          availableObjectIds: state.objects.map(o => o.id),
+        });
+      }
+    }
+  }, [state]);
+
   // Get hand positions for canvas interaction
   const handTracking = useHandTracking();
 
@@ -82,15 +115,17 @@ export default function WhiteboardPage() {
         case 'COLOR':
           if (state.selectedId && command.payload?.color) {
             const colorMap: Record<string, string> = {
-              red: '#ef4444',
-              blue: '#3b82f6',
-              green: '#10b981',
-              yellow: '#fbbf24',
-              purple: '#8b5cf6',
-              orange: '#f97316',
-              pink: '#ec4899',
+              blue: '#6596F3',
+              red: '#F24E1E',
+              yellow: '#EAD094',
+              green: '#83B366',
+              orange: '#F25016',
+              purple: '#D3A4EA',
+              pink: '#FF7262',
               black: '#000000',
-              white: '#ffffff',
+              white: '#FFFFFF',
+              gray: '#A0A0A0',
+              grey: '#A0A0A0',
             };
             const color = colorMap[command.payload.color.toLowerCase()] || command.payload.color;
             dispatch({ type: 'COLOR', payload: { id: state.selectedId, color } });
@@ -208,7 +243,7 @@ export default function WhiteboardPage() {
           left: 0,
           width: '100vw',
           height: '100vh',
-          backgroundColor: '#1a1a1a',
+          backgroundColor: '#f2f2f7',
           overflow: 'hidden',
         }}
       >
@@ -222,28 +257,33 @@ export default function WhiteboardPage() {
         gesture={handTracking.gesture}
       />
 
-      {/* Status Overlays */}
+      {/* Status Overlays - Apple Style Glass Panel */}
       <div
+        className="glass"
         style={{
           position: 'fixed',
-          top: '20px',
-          left: '20px',
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          color: '#fff',
-          padding: '12px 16px',
-          borderRadius: '8px',
-          fontSize: '14px',
-          fontFamily: 'monospace',
+          top: '24px',
+          left: '24px',
+          color: '#000',
+          padding: '16px 20px',
+          borderRadius: '16px',
+          fontSize: '13px',
+          fontWeight: 500,
           zIndex: 1000,
           display: 'flex',
           flexDirection: 'column',
-          gap: '8px',
+          gap: '12px',
+          minWidth: '200px',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <strong>Voice:</strong> {voiceCommands.status}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 600, color: '#8e8e93' }}>Voice</span>
+            <span style={{ color: '#000' }}>{voiceCommands.status}</span>
+          </div>
           {!voiceCommands.isListening && voiceCommands.status !== 'Listening...' && (
-            <>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button
                 onClick={async (e) => {
                   e.preventDefault();
@@ -257,16 +297,32 @@ export default function WhiteboardPage() {
                   }
                 }}
                 style={{
-                  padding: '4px 12px',
+                  padding: '8px 16px',
                   backgroundColor: voiceCommands.status.includes('permission') || voiceCommands.status.includes('denied') || voiceCommands.status.includes('not found')
-                    ? '#ef4444' 
-                    : '#3b82f6',
+                    ? '#ff3b30' 
+                    : '#007aff',
                   color: 'white',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: '10px',
                   cursor: 'pointer',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.02)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+                }}
+                onMouseDown={(e) => {
+                  e.currentTarget.style.transform = 'scale(0.98)';
+                }}
+                onMouseUp={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.02)';
                 }}
               >
                 {voiceCommands.status.includes('permission') || voiceCommands.status.includes('denied')
@@ -280,10 +336,8 @@ export default function WhiteboardPage() {
                   onClick={async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    // Try to reset permissions by opening settings
                     console.log('Attempting to reset microphone permissions...');
                     try {
-                      // For Chrome/Edge: Try to open site settings
                       if (navigator.userAgent.includes('Chrome')) {
                         alert('To fix microphone access:\n\n1. Click the lock/info icon in the address bar\n2. Set Microphone to "Allow"\n3. Refresh the page\n4. Click "Start Listening" again');
                       } else if (navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome')) {
@@ -296,81 +350,129 @@ export default function WhiteboardPage() {
                     }
                   }}
                   style={{
-                    padding: '4px 8px',
-                    backgroundColor: '#6b7280',
-                    color: 'white',
+                    padding: '8px 14px',
+                    backgroundColor: 'rgba(142, 142, 147, 0.2)',
+                    color: '#000',
                     border: 'none',
-                    borderRadius: '4px',
+                    borderRadius: '10px',
                     cursor: 'pointer',
-                    fontSize: '11px',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(142, 142, 147, 0.3)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(142, 142, 147, 0.2)';
                   }}
                   title="Get help fixing microphone access"
                 >
                   Help
                 </button>
               )}
-            </>
+            </div>
           )}
         </div>
-        <div>
-          <strong>Gesture:</strong> {handTracking.gesture || 'None'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontWeight: 600, color: '#8e8e93' }}>Gesture</span>
+          <span style={{ 
+            color: '#000',
+            padding: '4px 10px',
+            backgroundColor: handTracking.gesture ? 'rgba(0, 122, 255, 0.1)' : 'rgba(142, 142, 147, 0.1)',
+            borderRadius: '8px',
+            fontSize: '12px',
+            fontWeight: 600,
+          }}>
+            {handTracking.gesture || 'None'}
+          </span>
           {!handTracking.isActive && (
-            <span style={{ fontSize: '10px', color: '#888', marginLeft: '8px' }}>
-              (Tracking: {handTracking.isActive ? 'Active' : 'Inactive'})
-            </span>
-          )}
-          {(handTracking.leftHand || handTracking.rightHand) && (
-            <span style={{ fontSize: '10px', color: '#888', marginLeft: '8px' }}>
-              ({handTracking.leftHand ? 'L' : ''}{handTracking.leftHand && handTracking.rightHand ? '/' : ''}{handTracking.rightHand ? 'R' : ''})
+            <span style={{ fontSize: '11px', color: '#8e8e93', marginLeft: '4px' }}>
+              (Inactive)
             </span>
           )}
         </div>
         {state.selectedId && (
-          <div>
-            <strong>Selected:</strong> {state.selectedId.slice(0, 8)}...
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontWeight: 600, color: '#8e8e93' }}>Selected</span>
+            <span style={{ color: '#000', fontFamily: 'monospace', fontSize: '11px' }}>
+              {state.selectedId.slice(0, 8)}...
+            </span>
           </div>
         )}
         {(handTracking.leftHand || handTracking.rightHand) && (
-          <div>
-            <strong>Hands:</strong>{' '}
-            {handTracking.leftHand && 'L'}
-            {handTracking.leftHand && handTracking.rightHand && '/'}
-            {handTracking.rightHand && 'R'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontWeight: 600, color: '#8e8e93' }}>Hands</span>
+            <span style={{ color: '#000' }}>
+              {handTracking.leftHand && 'L'}
+              {handTracking.leftHand && handTracking.rightHand && '/'}
+              {handTracking.rightHand && 'R'}
+            </span>
           </div>
         )}
       </div>
 
-      {/* Instructions */}
+      {/* Instructions - Apple Style Glass Panel */}
       <div
+        className="glass"
         style={{
           position: 'fixed',
-          bottom: '20px',
-          right: '20px',
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          color: '#fff',
-          padding: '16px',
-          borderRadius: '8px',
+          bottom: '24px',
+          right: '24px',
+          color: '#000',
+          padding: '20px',
+          borderRadius: '16px',
           fontSize: '12px',
-          maxWidth: '300px',
+          maxWidth: '320px',
           zIndex: 1000,
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
-        <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Voice Commands:</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <div>• &quot;Create box&quot; / &quot;Create sticky note&quot;</div>
-          <div>• &quot;Create circle&quot; / &quot;Create arrow&quot;</div>
-          <div>• &quot;Delete object&quot; / &quot;Duplicate object&quot;</div>
-          <div>• &quot;Change color to [color]&quot;</div>
-          <div>• &quot;Add text: [content]&quot;</div>
-          <div>• &quot;Lock this&quot; / &quot;Unlock this&quot;</div>
-          <div>• &quot;Zoom in&quot; / &quot;Zoom out&quot;</div>
-          <div>• &quot;Undo&quot; / &quot;Redo&quot;</div>
+        <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: '#000' }}>
+          Voice Commands
         </div>
-        <div style={{ marginTop: '12px', fontWeight: 'bold' }}>Gestures:</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <div>• Closed fist = grab object</div>
-          <div>• Open hand = release</div>
-          <div>• Two open hands = pan canvas</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Create box&quot; / &quot;Create sticky note&quot;
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Create circle&quot; / &quot;Create arrow&quot;
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Delete object&quot; / &quot;Duplicate object&quot;
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Change color to [color]&quot;
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Add text: [content]&quot;
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Lock this&quot; / &quot;Unlock this&quot;
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Zoom in&quot; / &quot;Zoom out&quot;
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • &quot;Undo&quot; / &quot;Redo&quot;
+          </div>
+        </div>
+        <div style={{ marginTop: '16px', marginBottom: '12px', fontWeight: 600, fontSize: '14px', color: '#000' }}>
+          Gestures
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • Pinch (thumb + index) = grab & move object
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • Point (index extended) = hover/select
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • Two-hand pinch = pan canvas
+          </div>
+          <div style={{ color: '#3a3a3c', lineHeight: '1.5' }}>
+            • Open hand = release
+          </div>
         </div>
       </div>
       </div>

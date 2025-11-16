@@ -3,11 +3,11 @@ import { CanvasState, CanvasAction, CanvasObject, ObjectType } from './whiteboar
 const GRID_SIZE = 10;
 const SNAP_THRESHOLD = 15; // Distance in pixels to trigger snapping
 const DEFAULT_COLORS: Record<ObjectType, string> = {
-  box: '#3b82f6',
-  sticky: '#fbbf24',
-  circle: '#ef4444',
-  arrow: '#8b5cf6',
-  textbox: '#10b981',
+  box: '#6596F3',      // Blue
+  sticky: '#EAD094',   // Yellow
+  circle: '#F24E1E',   // Red
+  arrow: '#D3A4EA',    // Purple
+  textbox: '#83B366',  // Green
 };
 
 export interface SnapGuide {
@@ -277,12 +277,41 @@ export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasS
     }
 
     case 'MOVE': {
+      console.log('[Reducer Debug] MOVE action:', {
+        objectId: action.payload.id,
+        newPosition: { x: action.payload.x, y: action.payload.y },
+        objectsCount: state.objects.length,
+        availableObjectIds: state.objects.map(o => o.id),
+        hasSelectedId: !!state.selectedId,
+        selectedId: state.selectedId,
+      });
+      
       const obj = state.objects.find((o) => o.id === action.payload.id);
-      if (!obj || obj.locked) return state;
+      if (!obj || obj.locked) {
+        console.warn('[Reducer Debug] MOVE failed - object not found or locked:', {
+          objectId: action.payload.id,
+          objectExists: !!obj,
+          isLocked: obj?.locked,
+          objectsCount: state.objects.length,
+        });
+        return state;
+      }
 
       // Calculate snap with object-to-object alignment
       const otherObjects = state.objects.filter((o) => o.id !== action.payload.id);
+      console.log('[Reducer Debug] Calculating snap:', {
+        draggedObjectId: obj.id,
+        otherObjectsCount: otherObjects.length,
+        otherObjectIds: otherObjects.map(o => o.id),
+      });
+      
       const snapResult = calculateSnap(obj, action.payload.x, action.payload.y, otherObjects);
+      
+      console.log('[Reducer Debug] Snap result:', {
+        snappedPosition: { x: snapResult.x, y: snapResult.y },
+        guidesCount: snapResult.guides.length,
+        guideObjectIds: snapResult.guides.map(g => g.toObject.id),
+      });
 
       newState = {
         ...state,
