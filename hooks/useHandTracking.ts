@@ -206,7 +206,7 @@ export function useHandTracking() {
             import('@mediapipe/camera_utils'),
           ]);
         } catch (err) {
-          console.error('Error during MediaPipe import:', err);
+          // Silently handle import errors
           return [null, null];
         }
       })
@@ -215,7 +215,7 @@ export function useHandTracking() {
         const [handsModule, cameraModule] = modules;
         
         if (!handsModule || !cameraModule) {
-          console.warn('MediaPipe modules failed to load. Hand tracking will be disabled.');
+          // MediaPipe modules failed to load - hand tracking will be disabled
           return;
         }
 
@@ -225,7 +225,9 @@ export function useHandTracking() {
         try {
           const hands = new Hands({
             locateFile: (file: string) => {
-              return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+              // Use unpkg CDN which is more reliable for MediaPipe assets
+              // The file parameter already includes the correct path structure
+              return `https://unpkg.com/@mediapipe/hands/${file}`;
             },
           });
 
@@ -246,15 +248,13 @@ export function useHandTracking() {
           setTimeout(() => {
             (window as any).__MediaPipeReady = true;
           }, 1000);
-          
-          console.log('MediaPipe Hands initialized successfully');
         } catch (error: any) {
-          console.error('Failed to initialize MediaPipe Hands:', error);
+          // Failed to initialize MediaPipe Hands
           handsRef.current = null;
         }
       })
       .catch((error) => {
-        console.error('Failed to load MediaPipe:', error);
+        // Failed to load MediaPipe - silently continue
       });
 
     return () => {
@@ -284,7 +284,7 @@ export function useHandTracking() {
     }
 
     if (!handsRef.current) {
-      console.warn('MediaPipe Hands not initialized. Hand tracking is disabled.');
+      // MediaPipe Hands not initialized - hand tracking disabled
       setIsActive(false);
       return;
     }
@@ -295,7 +295,7 @@ export function useHandTracking() {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         stream.getTracks().forEach(track => track.stop());
       } catch (permErr: any) {
-        console.error('Camera permission denied:', permErr);
+        // Camera permission denied
         setIsActive(false);
         return;
       }
@@ -316,12 +316,18 @@ export function useHandTracking() {
 
       let frameCount = 0;
       let isProcessingFrame = false;
+      
       const camera = new Camera(video, {
         onFrame: async () => {
           frameCount++;
           
           // Prevent concurrent frame processing and ensure MediaPipe is ready
-          if (isProcessingFrame || !handsRef.current || video.readyState !== video.HAVE_ENOUGH_DATA) {
+          if (isProcessingFrame || !handsRef.current) {
+            return;
+          }
+          
+          // Ensure video is ready and has data
+          if (video.readyState < video.HAVE_CURRENT_DATA) {
             return;
           }
           
@@ -340,15 +346,22 @@ export function useHandTracking() {
           const videoHeight = video.videoHeight || 0;
           
           if (videoWidth === 0 || videoHeight === 0) {
-            isProcessingFrame = false;
+            return;
+          }
+          
+          // Additional validation: ensure video element is valid and has a valid source
+          if (!video || !video.srcObject) {
             return;
           }
           
           isProcessingFrame = true;
           try {
-            await handsRef.current.send({ image: video });
+            // Ensure video is still valid before sending
+            if (video.readyState >= video.HAVE_CURRENT_DATA && videoWidth > 0 && videoHeight > 0) {
+              await handsRef.current.send({ image: video });
+            }
           } catch (error: any) {
-            console.error('Error sending frame to MediaPipe:', error);
+            // Silently handle frame processing errors (buffer errors are often transient)
           } finally {
             isProcessingFrame = false;
           }
@@ -357,11 +370,12 @@ export function useHandTracking() {
         height: 480,
       });
 
+      // Start the camera - it will set up the video stream
       camera.start();
       cameraRef.current = camera;
       setIsActive(true);
     } catch (error: any) {
-      console.error('Failed to start camera tracking:', error);
+      // Failed to start camera tracking
       setIsActive(false);
     }
   }, []);

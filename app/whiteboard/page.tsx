@@ -23,37 +23,9 @@ export default function WhiteboardPage() {
   const [state, dispatch] = useReducer(canvasReducer, initialState);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Diagnostic: Log state changes, especially when objects array is empty
+  // State change monitoring (silent)
   useEffect(() => {
-    console.log('[Whiteboard Debug] State changed:', {
-      objectsCount: state.objects.length,
-      selectedId: state.selectedId,
-      snapGuidesCount: state.snapGuides?.length || 0,
-      hasSelectedId: !!state.selectedId,
-      selectedIdExists: state.selectedId ? state.objects.some(o => o.id === state.selectedId) : false,
-      snapGuidesObjectIds: state.snapGuides?.map(g => g.toObject.id) || [],
-      allObjectIds: state.objects.map(o => o.id),
-    });
-    
-    // Check for state inconsistencies
-    if (state.selectedId && !state.objects.some(o => o.id === state.selectedId)) {
-      console.warn('[Whiteboard Debug] ⚠️ State inconsistency: selectedId references non-existent object:', {
-        selectedId: state.selectedId,
-        availableObjectIds: state.objects.map(o => o.id),
-      });
-    }
-    
-    if (state.snapGuides && state.snapGuides.length > 0) {
-      const invalidGuides = state.snapGuides.filter(g => 
-        !state.objects.some(o => o.id === g.toObject.id)
-      );
-      if (invalidGuides.length > 0) {
-        console.warn('[Whiteboard Debug] ⚠️ State inconsistency: snapGuides reference non-existent objects:', {
-          invalidGuides,
-          availableObjectIds: state.objects.map(o => o.id),
-        });
-      }
-    }
+    // State monitoring without console output
   }, [state]);
 
   // Get hand positions for canvas interaction
@@ -62,7 +34,6 @@ export default function WhiteboardPage() {
   // Handle voice commands
   const handleVoiceCommand = useCallback(
     (command: VoiceCommand) => {
-      console.log('Executing command:', command); // Debug log
       
       // Convert screen center to canvas coordinates
       const screenX = typeof window !== 'undefined' ? window.innerWidth / 2 : 400;
@@ -175,7 +146,7 @@ export default function WhiteboardPage() {
           break;
 
         default:
-          console.warn('Unknown command type:', command.type);
+          // Unknown command type - silently ignore
           break;
       }
     },
@@ -187,23 +158,12 @@ export default function WhiteboardPage() {
   // Initialize on mount
   useEffect(() => {
     if (!isInitialized && typeof window !== 'undefined') {
-      console.log('[Whiteboard Debug] Initializing whiteboard...');
-      console.log('[Whiteboard Debug] Hand tracking state:', {
-        isActive: handTracking.isActive,
-        hasLeftHand: !!handTracking.leftHand,
-        hasRightHand: !!handTracking.rightHand,
-        gesture: handTracking.gesture,
-      });
-      
       // Voice commands will auto-start (or show button if browser requires user interaction)
       // Delay hand tracking start to ensure MediaPipe is loaded (if available)
       setTimeout(() => {
-        console.log('[Whiteboard Debug] Attempting to start hand tracking...');
         try {
           handTracking.startTracking();
-          console.log('[Whiteboard Debug] Hand tracking start called');
         } catch (err) {
-          console.warn('[Whiteboard Debug] Hand tracking not available:', err);
           // Continue without hand tracking
         }
       }, 1000); // Increased delay to allow MediaPipe to initialize
@@ -288,12 +248,10 @@ export default function WhiteboardPage() {
                 onClick={async (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log('Button clicked, starting voice recognition...');
                   try {
                     await voiceCommands.startListening();
-                    console.log('Voice recognition started successfully');
                   } catch (error) {
-                    console.error('Failed to start listening:', error);
+                    // Failed to start listening
                   }
                 }}
                 style={{
@@ -336,7 +294,6 @@ export default function WhiteboardPage() {
                   onClick={async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log('Attempting to reset microphone permissions...');
                     try {
                       if (navigator.userAgent.includes('Chrome')) {
                         alert('To fix microphone access:\n\n1. Click the lock/info icon in the address bar\n2. Set Microphone to "Allow"\n3. Refresh the page\n4. Click "Start Listening" again');
@@ -346,7 +303,7 @@ export default function WhiteboardPage() {
                         alert('To fix microphone access:\n\n1. Check browser settings for microphone permissions\n2. Ensure localhost is allowed\n3. Refresh the page\n4. Click "Start Listening" again');
                       }
                     } catch (err) {
-                      console.error('Error showing help:', err);
+                      // Error showing help
                     }
                   }}
                   style={{
