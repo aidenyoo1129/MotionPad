@@ -22,10 +22,29 @@ export async function POST(request: NextRequest) {
     const roadmap = await generateRoadmap(syllabusText);
 
     return NextResponse.json(roadmap);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error generating roadmap:', error);
+    
+    // Check for Anthropic API credit/billing errors
+    if (error?.error?.error?.message) {
+      const apiError = error.error.error.message;
+      if (apiError.includes('credit balance') || apiError.includes('billing')) {
+        return NextResponse.json(
+          { 
+            error: 'Insufficient API credits. Please add credits to your Anthropic account at https://console.anthropic.com/',
+            details: apiError
+          },
+          { status: 402 }
+        );
+      }
+      return NextResponse.json(
+        { error: apiError },
+        { status: 400 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: 'Failed to generate roadmap' },
+      { error: error?.message || 'Failed to generate roadmap' },
       { status: 500 }
     );
   }

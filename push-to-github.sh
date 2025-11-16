@@ -14,7 +14,7 @@ if [ ! -d .git ]; then
 fi
 
 # Add remote (will fail silently if already exists)
-git remote add origin https://github.com/aidenyoo1129/academic-command-center.git 2>/dev/null || echo "Remote already exists"
+git remote add origin https://github.com/aidenyoo1129/Syllabus-Command-Center.git 2>/dev/null || echo "Remote already exists"
 
 # Rename branch to main
 git branch -M main
@@ -23,5 +23,5 @@ git branch -M main
 echo "Pushing to GitHub..."
 git push -u origin main
 
-echo "Done! Check your repository at: https://github.com/aidenyoo1129/academic-command-center"
+echo "Done! Check your repository at: https://github.com/aidenyoo1129/Syllabus-Command-Center"
 

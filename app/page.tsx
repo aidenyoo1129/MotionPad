@@ -42,7 +42,15 @@ export default function Home() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate roadmap");
+        const errorMessage = errorData.error || "Failed to generate roadmap";
+        // Show more helpful message for credit errors
+        if (response.status === 402 || errorMessage.includes('credit')) {
+          throw new Error(
+            "Your Anthropic API account has insufficient credits. " +
+            "Please add credits at https://console.anthropic.com/ or use a different API key."
+          );
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();

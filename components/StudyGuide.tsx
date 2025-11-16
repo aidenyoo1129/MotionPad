@@ -1,6 +1,6 @@
 "use client";
 
-import { StudyGuide } from "@/lib/types";
+import type { StudyGuide } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { BookOpen } from "lucide-react";
@@ -69,4 +69,5 @@ export function StudyGuide({ studyGuides }: StudyGuideProps) {
     </Card>
   );
 }
+
 

@@ -19,7 +19,7 @@ Please extract and structure the following information:
 4. Create study guides for major topics/units
 5. Generate a timeline with key milestones
 
-Return your response as a JSON object matching this exact structure:
+IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the JSON. Your response must be a valid JSON object matching this exact structure:
 {
   "courseName": "string",
   "tasks": [
@@ -61,7 +61,7 @@ Be thorough and create actionable subtasks for each major assignment or exam. Ge
 
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-haiku-20240307',
       max_tokens: 4096,
       messages: [
         {
@@ -73,16 +73,45 @@ Be thorough and create actionable subtasks for each major assignment or exam. Ge
 
     const content = message.content[0];
     if (content.type === 'text') {
-      // Extract JSON from the response (handle markdown code blocks)
+      // Extract JSON from the response (handle markdown code blocks and text before/after)
       let jsonText = content.text.trim();
-      if (jsonText.startsWith('```json')) {
-        jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-      } else if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/```\n?/g, '');
+      
+      // Remove markdown code blocks
+      if (jsonText.includes('```json')) {
+        const jsonMatch = jsonText.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          jsonText = jsonMatch[1].trim();
+        } else {
+          jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+        }
+      } else if (jsonText.includes('```')) {
+        const jsonMatch = jsonText.match(/```\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          jsonText = jsonMatch[1].trim();
+        } else {
+          jsonText = jsonText.replace(/```\n?/g, '');
+        }
+      }
+      
+      // Try to extract JSON object if there's text before/after
+      const jsonObjectMatch = jsonText.match(/\{[\s\S]*\}/);
+      if (jsonObjectMatch) {
+        jsonText = jsonObjectMatch[0];
       }
 
-      const roadmap = JSON.parse(jsonText) as SemesterRoadmap;
-      return roadmap;
+      // Clean up common JSON issues
+      jsonText = jsonText
+        .replace(/,\s*}/g, '}') // Remove trailing commas before }
+        .replace(/,\s*]/g, ']'); // Remove trailing commas before ]
+
+      try {
+        const roadmap = JSON.parse(jsonText) as SemesterRoadmap;
+        return roadmap;
+      } catch (parseError) {
+        console.error('JSON Parse Error:', parseError);
+        console.error('JSON Text (first 500 chars):', jsonText.substring(0, 500));
+        throw new Error(`Failed to parse JSON response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      }
     }
 
     throw new Error('Unexpected response format from Claude');
