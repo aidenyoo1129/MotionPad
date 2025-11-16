@@ -94,10 +94,12 @@ export function useHandTracking() {
           landmarksCount: landmarks.length,
         });
 
+        // Note: MediaPipe's handedness is relative to camera view, not user perspective.
+        // For mirrored front-facing cameras, we swap left/right to match user's perspective.
         if (isRight) {
-          rightHand = handPos;
+          leftHand = handPos;  // Swapped: MediaPipe's "Right" = user's left hand
         } else {
-          leftHand = handPos;
+          rightHand = handPos;  // Swapped: MediaPipe's "Left" = user's right hand
         }
       });
     } else {
@@ -115,35 +117,47 @@ export function useHandTracking() {
     const leftIsOpen = leftHand?.isOpen ?? false;
     const rightIsOpen = rightHand?.isOpen ?? false;
 
-    // DIAGNOSTIC: Log gesture detection
-    const gestureLog = {
-      leftHand: leftHand ? { isFist: leftIsFist, isOpen: leftIsOpen } : null,
-      rightHand: rightHand ? { isFist: rightIsFist, isOpen: rightIsOpen } : null,
-    };
-
+    // Determine gesture with improved logic
+    // Priority: GRAB > PAN > RELEASE > NONE
+    
     if (leftIsFist || rightIsFist) {
+      // Any fist = grab
       gesture = 'grab';
-      console.log('[Hand Tracking Debug] Gesture: GRAB', gestureLog);
-    } else if (leftIsOpen && rightIsOpen && leftHand && rightHand) {
+      console.log('[Hand Tracking Debug] ✅ GRAB detected', {
+        leftFist: leftIsFist,
+        rightFist: rightIsFist,
+        leftHand: leftHand ? 'present' : 'none',
+        rightHand: rightHand ? 'present' : 'none',
+      });
+    } else if (leftHand && rightHand && leftIsOpen && rightIsOpen) {
+      // Both hands open = pan
       gesture = 'pan';
-      // Calculate midpoint for panning
       const midX = ((leftHand.x + rightHand.x) / 2);
       const midY = ((leftHand.y + rightHand.y) / 2);
       
       if (lastMidpointRef.current) {
-        // Delta will be calculated in the component using this hook
         lastMidpointRef.current = { x: midX, y: midY };
       } else {
         lastMidpointRef.current = { x: midX, y: midY };
       }
-      console.log('[Hand Tracking Debug] Gesture: PAN', gestureLog);
-    } else if ((leftIsOpen && !rightHand) || (rightIsOpen && !leftHand)) {
+      console.log('[Hand Tracking Debug] ✅ PAN detected (both hands open)');
+    } else if (leftHand && leftIsOpen && !rightHand) {
+      // Single open hand (left) = release
       gesture = 'release';
-      console.log('[Hand Tracking Debug] Gesture: RELEASE', gestureLog);
+      console.log('[Hand Tracking Debug] ✅ RELEASE detected (left hand open, no right)');
+    } else if (rightHand && rightIsOpen && !leftHand) {
+      // Single open hand (right) = release
+      gesture = 'release';
+      console.log('[Hand Tracking Debug] ✅ RELEASE detected (right hand open, no left)');
     } else {
-      // Log when no gesture detected (throttled)
-      if (Math.random() < 0.01) {
-        console.log('[Hand Tracking Debug] Gesture: NONE', gestureLog);
+      // No clear gesture
+      gesture = null;
+      // Only log occasionally to reduce noise
+      if (Math.random() < 0.05) {
+        console.log('[Hand Tracking Debug] ⚠️ No gesture', {
+          leftHand: leftHand ? (leftIsFist ? 'fist' : leftIsOpen ? 'open' : 'other') : 'none',
+          rightHand: rightHand ? (rightIsFist ? 'fist' : rightIsOpen ? 'open' : 'other') : 'none',
+        });
       }
     }
 
@@ -221,7 +235,7 @@ export function useHandTracking() {
             return [null, null];
           }
         })
-        .then((modules) => {
+        .then(async (modules) => {
           if (!modules || !isMounted) return;
           const [handsModule, cameraModule] = modules;
           
@@ -253,34 +267,65 @@ export function useHandTracking() {
             let locateFileCallCount = 0;
             const locateFileLog: string[] = [];
             
+            // Ensure MediaPipe's Module object exists before initialization
+            // This is required for asset loading
+            if (typeof (window as any).Module === 'undefined') {
+              console.log('[MediaPipe Debug] Initializing Module object...');
+              (window as any).Module = {
+                locateFile: (file: string) => {
+                  return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                },
+              };
+            }
+            
             // Wrap in try-catch to handle MediaPipe initialization errors
             let hands;
-            try {
-              console.log('[MediaPipe Debug] Creating Hands instance...');
-              hands = new Hands({
-                locateFile: (file: string) => {
-                  locateFileCallCount++;
-                  const url = `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-                  locateFileLog.push(`Call ${locateFileCallCount}: file="${file}" -> url="${url}"`);
-                  
-                  if (locateFileCallCount <= 5) {
-                    console.log(`[MediaPipe Debug] locateFile called #${locateFileCallCount}:`, { file, url });
-                  }
-                  
-                  return url;
-                },
-              });
-              console.log('[MediaPipe Debug] Hands instance created successfully');
-              console.log('[MediaPipe Debug] locateFile was called', locateFileCallCount, 'times');
-              if (locateFileLog.length > 0) {
-                console.log('[MediaPipe Debug] First few locateFile calls:', locateFileLog.slice(0, 5));
+            const createHands = () => {
+              try {
+                console.log('[MediaPipe Debug] Creating Hands instance...');
+                hands = new Hands({
+                  locateFile: (file: string) => {
+                    locateFileCallCount++;
+                    const url = `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                    locateFileLog.push(`Call ${locateFileCallCount}: file="${file}" -> url="${url}"`);
+                    
+                    if (locateFileCallCount <= 5) {
+                      console.log(`[MediaPipe Debug] locateFile called #${locateFileCallCount}:`, { file, url });
+                    }
+                    
+                    return url;
+                  },
+                });
+                console.log('[MediaPipe Debug] Hands instance created successfully');
+                console.log('[MediaPipe Debug] locateFile was called', locateFileCallCount, 'times');
+                if (locateFileLog.length > 0) {
+                  console.log('[MediaPipe Debug] First few locateFile calls:', locateFileLog.slice(0, 5));
+                }
+                return true;
+              } catch (initError: any) {
+                console.error('[MediaPipe Debug] Hands constructor error:', initError);
+                console.error('[MediaPipe Debug] Error stack:', initError?.stack);
+                console.error('[MediaPipe Debug] Error name:', initError?.name);
+                console.error('[MediaPipe Debug] Error message:', initError?.message);
+                return false;
               }
-            } catch (initError: any) {
-              console.error('[MediaPipe Debug] Hands constructor error:', initError);
-              console.error('[MediaPipe Debug] Error stack:', initError?.stack);
-              console.error('[MediaPipe Debug] Error name:', initError?.name);
-              console.error('[MediaPipe Debug] Error message:', initError?.message);
-              throw initError;
+            };
+            
+            // Try to create Hands, with retry if needed
+            if (!createHands()) {
+              console.log('[MediaPipe Debug] Initial attempt failed, retrying after delay...');
+              // Wait a bit for MediaPipe to fully initialize, then retry
+              await new Promise<void>(resolve => {
+                setTimeout(() => {
+                  if (!createHands()) {
+                    console.error('[MediaPipe Debug] Failed to create Hands after retry');
+                    throw new Error('Failed to initialize MediaPipe Hands');
+                  } else {
+                    console.log('[MediaPipe Debug] Hands created successfully on retry');
+                  }
+                  resolve();
+                }, 500);
+              });
             }
 
             console.log('[MediaPipe Debug] Setting Hands options...');
@@ -310,6 +355,13 @@ export function useHandTracking() {
             
             // Store Camera class for later use
             (window as any).__MediaPipeCamera = Camera;
+            
+            // Mark MediaPipe as ready after a short delay to ensure WASM is fully loaded
+            // This helps prevent "Assertion failed" errors when sending frames
+            setTimeout(() => {
+              (window as any).__MediaPipeReady = true;
+              console.log('[MediaPipe Debug] MediaPipe marked as ready');
+            }, 1000);
             
             console.log('MediaPipe Hands initialized successfully');
           } catch (error: any) {
@@ -401,25 +453,102 @@ export function useHandTracking() {
       document.body.appendChild(video);
       videoRef.current = video;
 
-      let frameCount = 0;
-      const camera = new Camera(video, {
-        onFrame: async () => {
-          frameCount++;
-          if (frameCount % 30 === 0) {
-            console.log('[Hand Tracking Debug] Processing frame #', frameCount, 'Video ready:', video.readyState);
-          }
-          
-          if (handsRef.current && video.readyState === video.HAVE_ENOUGH_DATA) {
-            try {
-              await handsRef.current.send({ image: video });
-            } catch (error) {
-              console.error('[Hand Tracking Debug] Error sending frame to MediaPipe:', error);
-            }
-          }
-        },
-        width: 640,
-        height: 480,
-      });
+          let frameCount = 0;
+          let isProcessingFrame = false;
+          const camera = new Camera(video, {
+            onFrame: async () => {
+              frameCount++;
+              if (frameCount % 30 === 0) {
+                console.log('[Hand Tracking Debug] Processing frame #', frameCount, 'Video ready:', video.readyState);
+              }
+              
+              // Prevent concurrent frame processing and ensure MediaPipe is ready
+              if (isProcessingFrame || !handsRef.current || video.readyState !== video.HAVE_ENOUGH_DATA) {
+                return;
+              }
+              
+              // Check if MediaPipe is fully initialized (WASM loaded)
+              if (!(window as any).__MediaPipeReady) {
+                // Skip frames until MediaPipe is ready to avoid "Assertion failed" errors
+                if (frameCount % 60 === 0) {
+                  console.log('[Hand Tracking Debug] Waiting for MediaPipe to fully initialize...');
+                }
+                return;
+              }
+              
+              // Check if MediaPipe is ready by verifying the instance exists and has necessary methods
+              if (!handsRef.current || typeof handsRef.current.send !== 'function') {
+                console.warn('[Hand Tracking Debug] MediaPipe Hands not ready, skipping frame');
+                return;
+              }
+              
+              // DIAGNOSTIC: Check video element dimensions before sending
+              const videoWidth = video.videoWidth || 0;
+              const videoHeight = video.videoHeight || 0;
+              const elementWidth = video.width || 0;
+              const elementHeight = video.height || 0;
+              
+              // Log video dimensions on first frame and periodically
+              if (frameCount === 1 || frameCount % 60 === 0) {
+                console.log('[Hand Tracking Debug] Video element state:', {
+                  frameCount,
+                  readyState: video.readyState,
+                  videoWidth,
+                  videoHeight,
+                  elementWidth,
+                  elementHeight,
+                  hasValidDimensions: videoWidth > 0 && videoHeight > 0,
+                  videoSrc: video.src || 'no src',
+                  videoCurrentTime: video.currentTime,
+                });
+              }
+              
+              // CRITICAL: Don't send frame if video dimensions are invalid
+              if (videoWidth === 0 || videoHeight === 0) {
+                if (frameCount % 30 === 0) {
+                  console.warn('[Hand Tracking Debug] ⚠️ Skipping frame - video dimensions are 0', {
+                    videoWidth,
+                    videoHeight,
+                    readyState: video.readyState,
+                  });
+                }
+                isProcessingFrame = false;
+                return;
+              }
+              
+              isProcessingFrame = true;
+              try {
+                // DIAGNOSTIC: Log what we're sending to MediaPipe
+                if (frameCount === 1 || frameCount % 60 === 0) {
+                  console.log('[Hand Tracking Debug] Sending frame to MediaPipe:', {
+                    frameCount,
+                    videoWidth,
+                    videoHeight,
+                    imageType: typeof video,
+                    imageConstructor: video.constructor.name,
+                  });
+                }
+                
+                await handsRef.current.send({ image: video });
+              } catch (error: any) {
+                // Log all errors with full context for debugging
+                console.error('[Hand Tracking Debug] ❌ Error sending frame to MediaPipe:', {
+                  error,
+                  errorMessage: error?.message,
+                  errorName: error?.name,
+                  frameCount,
+                  videoWidth,
+                  videoHeight,
+                  readyState: video.readyState,
+                  isMemoryError: error?.message?.includes('memory') || error?.message?.includes('out of bounds'),
+                });
+              } finally {
+                isProcessingFrame = false;
+              }
+            },
+            width: 640,
+            height: 480,
+          });
 
       console.log('[Hand Tracking Debug] Starting camera...');
       camera.start();

@@ -31,10 +31,12 @@ const COMMAND_PATTERNS: Array<{ pattern: RegExp; type: string; extractPayload?: 
   { pattern: /color\s+(?:it\s+)?(\w+)/i, type: 'COLOR', extractPayload: (match) => ({ color: match[1] }) },
   { pattern: /make\s+it\s+(\w+)/i, type: 'COLOR', extractPayload: (match) => ({ color: match[1] }) },
   
-  // Text
+  // Text - only explicit commands to avoid matching "create box" or other phrases
   { pattern: /add\s+text[:\s]+(.+)/i, type: 'TEXT', extractPayload: (match) => ({ text: match[1] }) },
   { pattern: /set\s+text[:\s]+(.+)/i, type: 'TEXT', extractPayload: (match) => ({ text: match[1] }) },
-  { pattern: /text[:\s]+(.+)/i, type: 'TEXT', extractPayload: (match) => ({ text: match[1] }) },
+  { pattern: /enter\s+text[:\s]+(.+)/i, type: 'TEXT', extractPayload: (match) => ({ text: match[1] }) },
+  { pattern: /type\s+text[:\s]+(.+)/i, type: 'TEXT', extractPayload: (match) => ({ text: match[1] }) },
+  // Removed generic /text[:\s]+(.+)/i pattern to prevent false matches with "create box" etc.
   
   // Lock/unlock
   { pattern: /lock\s+(?:this|it|the\s+object)?/i, type: 'LOCK' },

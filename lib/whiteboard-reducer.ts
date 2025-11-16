@@ -1,6 +1,7 @@
 import { CanvasState, CanvasAction, CanvasObject, ObjectType } from './whiteboard-types';
 
 const GRID_SIZE = 10;
+const SNAP_THRESHOLD = 15; // Distance in pixels to trigger snapping
 const DEFAULT_COLORS: Record<ObjectType, string> = {
   box: '#3b82f6',
   sticky: '#fbbf24',
@@ -9,8 +10,211 @@ const DEFAULT_COLORS: Record<ObjectType, string> = {
   textbox: '#10b981',
 };
 
+export interface SnapGuide {
+  type: 'vertical' | 'horizontal';
+  position: number; // x for vertical, y for horizontal
+  fromObject: { id: string; edge: 'left' | 'right' | 'top' | 'bottom' | 'centerX' | 'centerY' };
+  toObject: { id: string; edge: 'left' | 'right' | 'top' | 'bottom' | 'centerX' | 'centerY' };
+}
+
+export interface SnapResult {
+  x: number;
+  y: number;
+  guides: SnapGuide[];
+}
+
 function snapToGrid(value: number): number {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
+
+/**
+ * Calculate snap points for an object being moved
+ * Returns the snapped position and visual guides
+ */
+export function calculateSnap(
+  draggedObject: CanvasObject,
+  newX: number,
+  newY: number,
+  otherObjects: CanvasObject[]
+): SnapResult {
+  const guides: SnapGuide[] = [];
+  let snappedX = newX;
+  let snappedY = newY;
+
+  // Calculate edges and centers of the dragged object at new position
+  const draggedLeft = newX;
+  const draggedRight = newX + draggedObject.width;
+  const draggedTop = newY;
+  const draggedBottom = newY + draggedObject.height;
+  const draggedCenterX = newX + draggedObject.width / 2;
+  const draggedCenterY = newY + draggedObject.height / 2;
+
+  // Track best snap candidates
+  let bestXSnap: { distance: number; position: number; guide: SnapGuide | null } | null = null;
+  let bestYSnap: { distance: number; position: number; guide: SnapGuide | null } | null = null;
+
+  // Check against all other objects
+  for (const other of otherObjects) {
+    if (other.id === draggedObject.id || other.locked) continue;
+
+    const otherLeft = other.x;
+    const otherRight = other.x + other.width;
+    const otherTop = other.y;
+    const otherBottom = other.y + other.height;
+    const otherCenterX = other.x + other.width / 2;
+    const otherCenterY = other.y + other.height / 2;
+
+    // Check vertical alignment (X-axis snapping)
+    const alignmentsX = [
+      { pos: otherLeft, edge: 'left' as const, otherEdge: 'left' as const },
+      { pos: otherRight, edge: 'right' as const, otherEdge: 'right' as const },
+      { pos: otherCenterX, edge: 'centerX' as const, otherEdge: 'centerX' as const },
+    ];
+
+    for (const align of alignmentsX) {
+      // Check if dragged object's left edge should snap
+      const distLeft = Math.abs(draggedLeft - align.pos);
+      if (distLeft < SNAP_THRESHOLD) {
+        if (!bestXSnap || distLeft < bestXSnap.distance) {
+          bestXSnap = {
+            distance: distLeft,
+            position: align.pos,
+            guide: {
+              type: 'vertical',
+              position: align.pos,
+              fromObject: { id: draggedObject.id, edge: 'left' },
+              toObject: { id: other.id, edge: align.otherEdge },
+            },
+          };
+        }
+      }
+
+      // Check if dragged object's right edge should snap
+      const distRight = Math.abs(draggedRight - align.pos);
+      if (distRight < SNAP_THRESHOLD) {
+        if (!bestXSnap || distRight < bestXSnap.distance) {
+          bestXSnap = {
+            distance: distRight,
+            position: align.pos - draggedObject.width,
+            guide: {
+              type: 'vertical',
+              position: align.pos,
+              fromObject: { id: draggedObject.id, edge: 'right' },
+              toObject: { id: other.id, edge: align.otherEdge },
+            },
+          };
+        }
+      }
+
+      // Check if dragged object's center should snap
+      const distCenter = Math.abs(draggedCenterX - align.pos);
+      if (distCenter < SNAP_THRESHOLD) {
+        if (!bestXSnap || distCenter < bestXSnap.distance) {
+          bestXSnap = {
+            distance: distCenter,
+            position: align.pos - draggedObject.width / 2,
+            guide: {
+              type: 'vertical',
+              position: align.pos,
+              fromObject: { id: draggedObject.id, edge: 'centerX' },
+              toObject: { id: other.id, edge: align.otherEdge },
+            },
+          };
+        }
+      }
+    }
+
+    // Check horizontal alignment (Y-axis snapping)
+    const alignmentsY = [
+      { pos: otherTop, edge: 'top' as const, otherEdge: 'top' as const },
+      { pos: otherBottom, edge: 'bottom' as const, otherEdge: 'bottom' as const },
+      { pos: otherCenterY, edge: 'centerY' as const, otherEdge: 'centerY' as const },
+    ];
+
+    for (const align of alignmentsY) {
+      // Check if dragged object's top edge should snap
+      const distTop = Math.abs(draggedTop - align.pos);
+      if (distTop < SNAP_THRESHOLD) {
+        if (!bestYSnap || distTop < bestYSnap.distance) {
+          bestYSnap = {
+            distance: distTop,
+            position: align.pos,
+            guide: {
+              type: 'horizontal',
+              position: align.pos,
+              fromObject: { id: draggedObject.id, edge: 'top' },
+              toObject: { id: other.id, edge: align.otherEdge },
+            },
+          };
+        }
+      }
+
+      // Check if dragged object's bottom edge should snap
+      const distBottom = Math.abs(draggedBottom - align.pos);
+      if (distBottom < SNAP_THRESHOLD) {
+        if (!bestYSnap || distBottom < bestYSnap.distance) {
+          bestYSnap = {
+            distance: distBottom,
+            position: align.pos - draggedObject.height,
+            guide: {
+              type: 'horizontal',
+              position: align.pos,
+              fromObject: { id: draggedObject.id, edge: 'bottom' },
+              toObject: { id: other.id, edge: align.otherEdge },
+            },
+          };
+        }
+      }
+
+      // Check if dragged object's center should snap
+      const distCenter = Math.abs(draggedCenterY - align.pos);
+      if (distCenter < SNAP_THRESHOLD) {
+        if (!bestYSnap || distCenter < bestYSnap.distance) {
+          bestYSnap = {
+            distance: distCenter,
+            position: align.pos - draggedObject.height / 2,
+            guide: {
+              type: 'horizontal',
+              position: align.pos,
+              fromObject: { id: draggedObject.id, edge: 'centerY' },
+              toObject: { id: other.id, edge: align.otherEdge },
+            },
+          };
+        }
+      }
+    }
+  }
+
+  // Apply best snaps
+  if (bestXSnap) {
+    snappedX = bestXSnap.position;
+    if (bestXSnap.guide) {
+      guides.push(bestXSnap.guide);
+    }
+  } else {
+    // Fallback to grid snapping if no object snap
+    snappedX = snapToGrid(snappedX);
+  }
+
+  if (bestYSnap) {
+    snappedY = bestYSnap.position;
+    if (bestYSnap.guide) {
+      guides.push(bestYSnap.guide);
+    }
+  } else {
+    // Fallback to grid snapping if no object snap
+    snappedY = snapToGrid(snappedY);
+  }
+
+  return { x: snappedX, y: snappedY, guides };
+}
+
+// Helper to ensure snapGuides is always defined in state
+function ensureSnapGuides(state: CanvasState): CanvasState {
+  if (!state.snapGuides) {
+    return { ...state, snapGuides: [] };
+  }
+  return state;
 }
 
 function generateId(): string {
@@ -67,6 +271,7 @@ export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasS
         ...state,
         objects: [...state.objects, newObject],
         selectedId: newObject.id,
+        snapGuides: [],
       };
       break;
     }
@@ -75,13 +280,19 @@ export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasS
       const obj = state.objects.find((o) => o.id === action.payload.id);
       if (!obj || obj.locked) return state;
 
+      // Calculate snap with object-to-object alignment
+      const otherObjects = state.objects.filter((o) => o.id !== action.payload.id);
+      const snapResult = calculateSnap(obj, action.payload.x, action.payload.y, otherObjects);
+
       newState = {
         ...state,
         objects: state.objects.map((o) =>
           o.id === action.payload.id
-            ? { ...o, x: snapToGrid(action.payload.x), y: snapToGrid(action.payload.y) }
+            ? { ...o, x: snapResult.x, y: snapResult.y }
             : o
         ),
+        // Store snap guides for visual feedback
+        snapGuides: snapResult.guides,
       };
       break;
     }
@@ -165,6 +376,15 @@ export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasS
       newState = {
         ...state,
         selectedId: action.payload.id,
+        snapGuides: [], // Clear guides when selecting
+      };
+      break;
+    }
+
+    case 'CLEAR_SNAP_GUIDES': {
+      newState = {
+        ...state,
+        snapGuides: [],
       };
       break;
     }
@@ -174,6 +394,7 @@ export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasS
         ...state,
         panX: state.panX + action.payload.deltaX,
         panY: state.panY + action.payload.deltaY,
+        snapGuides: [], // Clear guides when panning
       };
       break;
     }
@@ -242,7 +463,8 @@ export function canvasReducer(state: CanvasState, action: CanvasAction): CanvasS
       return state;
   }
 
-  return newState;
+  // Ensure snapGuides is always defined
+  return ensureSnapGuides(newState);
 }
 
 export function findNearestObjectAt(

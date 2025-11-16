@@ -20,6 +20,12 @@ export interface CanvasState {
   zoom: number;
   history: CanvasObject[][];
   historyIndex: number;
+  snapGuides?: Array<{
+    type: 'vertical' | 'horizontal';
+    position: number;
+    fromObject: { id: string; edge: string };
+    toObject: { id: string; edge: string };
+  }>;
 }
 
 export type CanvasAction =
@@ -37,5 +43,6 @@ export type CanvasAction =
   | { type: 'RESET_CANVAS' }
   | { type: 'UNDO' }
   | { type: 'REDO' }
-  | { type: 'SAVE_SNAPSHOT' };
+  | { type: 'SAVE_SNAPSHOT' }
+  | { type: 'CLEAR_SNAP_GUIDES' };
 

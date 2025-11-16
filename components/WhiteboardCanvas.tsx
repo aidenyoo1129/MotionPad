@@ -28,17 +28,19 @@ export function WhiteboardCanvas({
   const dragObjectRef = useRef<string | null>(null);
   const lastHandPosRef = useRef<{ x: number; y: number } | null>(null);
   const lastPanMidpointRef = useRef<{ x: number; y: number } | null>(null);
+  const grabOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null);
   
   // Get active hand for single-hand gestures
   const activeHand = leftHand || rightHand;
   
   // Calculate hand position on screen for visual feedback
+  // Note: Mirror X coordinate for front-facing camera (MediaPipe coordinates are relative to video frame, not mirrored view)
   const handScreenPos = activeHand && canvasRef.current
     ? (() => {
         const rect = canvasRef.current!.getBoundingClientRect();
         return {
-          x: activeHand.x * rect.width,
+          x: (1 - activeHand.x) * rect.width,  // Mirror X: 1 - x
           y: activeHand.y * rect.height,
         };
       })()
@@ -79,7 +81,8 @@ export function WhiteboardCanvas({
     if (gesture === 'pan' && leftHand && rightHand) {
       const PAN_SENSITIVITY = 1.5; // Adjust panning sensitivity
       
-      const midX = ((leftHand.x + rightHand.x) / 2) * rect.width;
+      // Mirror X coordinates for front-facing camera
+      const midX = ((1 - leftHand.x + 1 - rightHand.x) / 2) * rect.width;
       const midY = ((leftHand.y + rightHand.y) / 2) * rect.height;
 
       if (lastPanMidpointRef.current) {
@@ -100,7 +103,8 @@ export function WhiteboardCanvas({
       return;
     }
 
-    const screenX = activeHand.x * rect.width;
+    // Mirror X coordinate for front-facing camera
+    const screenX = (1 - activeHand.x) * rect.width;
     const screenY = activeHand.y * rect.height;
     const canvasPos = screenToCanvas(screenX, screenY);
 
@@ -119,6 +123,16 @@ export function WhiteboardCanvas({
         dragObjectRef.current = nearest.id;
         setHoveredObjectId(nearest.id);
         onSelect(nearest.id);
+        
+        // Calculate offset between hand position and object center
+        // This offset will be maintained as the hand moves
+        const objCenterX = nearest.x + nearest.width / 2;
+        const objCenterY = nearest.y + nearest.height / 2;
+        grabOffsetRef.current = {
+          x: canvasPos.x - objCenterX,
+          y: canvasPos.y - objCenterY,
+        };
+        
         lastHandPosRef.current = canvasPos;
       }
     } else if (gesture === 'release') {
@@ -126,34 +140,26 @@ export function WhiteboardCanvas({
         isDraggingRef.current = false;
         dragObjectRef.current = null;
         lastHandPosRef.current = null;
+        grabOffsetRef.current = null; // Clear grab offset
         setHoveredObjectId(null);
       }
-    } else if (isDraggingRef.current && dragObjectRef.current && lastHandPosRef.current) {
-      // Move object with sensitivity multiplier for easier control
-      const SENSITIVITY = 2.5; // Increase this to make movements more responsive (try 2-4)
-      
-      // Calculate movement in screen space first for more intuitive control
-      const currentScreenX = activeHand.x * rect.width;
-      const currentScreenY = activeHand.y * rect.height;
-      
-      // Convert last canvas position to screen coordinates
-      const lastScreenX = lastHandPosRef.current.x * state.zoom + state.panX;
-      const lastScreenY = lastHandPosRef.current.y * state.zoom + state.panY;
-      
-      // Calculate delta in screen space and apply sensitivity
-      const screenDeltaX = (currentScreenX - lastScreenX) * SENSITIVITY;
-      const screenDeltaY = (currentScreenY - lastScreenY) * SENSITIVITY;
-      
-      // Convert screen delta to canvas delta
-      const canvasDeltaX = screenDeltaX / state.zoom;
-      const canvasDeltaY = screenDeltaY / state.zoom;
-      
+    } else if (isDraggingRef.current && dragObjectRef.current && grabOffsetRef.current) {
+      // Position object so the grab point stays exactly under the hand
       const obj = state.objects.find((o) => o.id === dragObjectRef.current);
       if (obj) {
-        onMove(dragObjectRef.current, obj.x + canvasDeltaX, obj.y + canvasDeltaY);
+        // Calculate where the object center should be to maintain the grab offset
+        // Object center = hand position - grab offset
+        const newCenterX = canvasPos.x - grabOffsetRef.current.x;
+        const newCenterY = canvasPos.y - grabOffsetRef.current.y;
+        
+        // Convert center position to top-left position (object coordinates)
+        const newX = newCenterX - obj.width / 2;
+        const newY = newCenterY - obj.height / 2;
+        
+        onMove(dragObjectRef.current, newX, newY);
       }
       
-      // Update last position in canvas coordinates
+      // Update last position
       lastHandPosRef.current = canvasPos;
     }
   }, [leftHand, rightHand, activeHand, gesture, state.objects, state.zoom, onSelect, onMove, onPan, screenToCanvas]);
@@ -407,6 +413,89 @@ export function WhiteboardCanvas({
                 strokeDasharray="5,5"
                 opacity="0.6"
               />
+            </svg>
+          );
+        })()
+      )}
+      
+      {/* Snap guides - blue lines showing alignment */}
+      {isDraggingRef.current && state.snapGuides && state.snapGuides.length > 0 && (
+        (() => {
+          const draggedObj = state.objects.find(o => o.id === dragObjectRef.current);
+          if (!draggedObj) return null;
+          
+          // Get bounding box of all objects involved in snapping
+          const allObjects = [draggedObj, ...state.snapGuides.map(g => 
+            state.objects.find(o => o.id === g.toObject.id)
+          ).filter(Boolean) as CanvasObject[]];
+          
+          if (allObjects.length === 0) return null;
+          
+          // Calculate bounds
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const obj of allObjects) {
+            minX = Math.min(minX, obj.x);
+            maxX = Math.max(maxX, obj.x + obj.width);
+            minY = Math.min(minY, obj.y);
+            maxY = Math.max(maxY, obj.y + obj.height);
+          }
+          
+          // Extend bounds for guide lines
+          const padding = 50;
+          minX -= padding;
+          maxX += padding;
+          minY -= padding;
+          maxY += padding;
+          
+          // Convert to screen coordinates
+          const screenMinX = canvasToScreen(minX, 0).x;
+          const screenMaxX = canvasToScreen(maxX, 0).x;
+          const screenMinY = canvasToScreen(0, minY).y;
+          const screenMaxY = canvasToScreen(0, maxY).y;
+          
+          return (
+            <svg
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                zIndex: 1900,
+              }}
+            >
+              {state.snapGuides.map((guide, index) => {
+                if (guide.type === 'vertical') {
+                  const screenX = canvasToScreen(guide.position, 0).x;
+                  return (
+                    <line
+                      key={`guide-${index}`}
+                      x1={screenX}
+                      y1={screenMinY}
+                      x2={screenX}
+                      y2={screenMaxY}
+                      stroke="#3b82f6"
+                      strokeWidth="2"
+                      opacity="0.8"
+                    />
+                  );
+                } else {
+                  const screenY = canvasToScreen(0, guide.position).y;
+                  return (
+                    <line
+                      key={`guide-${index}`}
+                      x1={screenMinX}
+                      y1={screenY}
+                      x2={screenMaxX}
+                      y2={screenY}
+                      stroke="#3b82f6"
+                      strokeWidth="2"
+                      opacity="0.8"
+                    />
+                  );
+                }
+              })}
             </svg>
           );
         })()

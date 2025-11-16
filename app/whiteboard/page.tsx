@@ -16,6 +16,7 @@ const initialState: CanvasState = {
   zoom: 1,
   history: [[]],
   historyIndex: 0,
+  snapGuides: [],
 };
 
 export default function WhiteboardPage() {
@@ -184,10 +185,11 @@ export default function WhiteboardPage() {
     dispatch({ type: 'MOVE', payload: { id, x, y } });
   }, []);
 
-  // Save snapshot when gesture releases (after moving an object)
+  // Save snapshot and clear snap guides when gesture releases (after moving an object)
   useEffect(() => {
     if (handTracking.gesture === 'release' && state.selectedId) {
       dispatch({ type: 'SAVE_SNAPSHOT' });
+      dispatch({ type: 'CLEAR_SNAP_GUIDES' });
     }
   }, [handTracking.gesture, state.selectedId]);
 
